@@ -198,7 +198,7 @@
 
             try {
                 // In production, this hits YOUR Cloudflare Worker
-                const response = await fetch('/api/generate-prd', {
+                const response = await fetch('https://pgen-ai-worker.marsono4132.workers.dev/api/generate-prd', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ idea, llm_config: config })

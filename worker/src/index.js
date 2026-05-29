@@ -1,6 +1,18 @@
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+  "Access-Control-Max-Age": "86400",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    
+    // Handle CORS preflight requests
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders });
+    }
     
     if (url.pathname === "/api/generate-prd" && request.method === "POST") {
       return handleGeneratePRD(request, env);
@@ -10,42 +22,47 @@ export default {
       return handleSavedPRDs(request, env);
     }
     
-    return new Response("Not found", { status: 404 });
+    return new Response("Not found", { status: 404, headers: corsHeaders });
   },
 };
 
 async function handleGeneratePRD(request, env) {
-  const body = await request.json();
-  const { idea, llm_config } = body;
-  
-  if (!idea) {
-    return new Response("IDEA_REQUIRED", { status: 400 });
-  }
-  
-  const systemPrompt = getPRDPrompt(idea);
-  
-  const response = await fetch(llm_config.endpoint, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${llm_config.api_key}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model: llm_config.model || "default",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: idea }
-      ],
-      stream: true
-    })
-  });
-
-  return new Response(response.body, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache"
+  try {
+    const body = await request.json();
+    const { idea, llm_config } = body;
+    
+    if (!idea) {
+      return new Response("IDEA_REQUIRED", { status: 400, headers: corsHeaders });
     }
-  });
+    
+    const systemPrompt = getPRDPrompt(idea);
+    
+    const response = await fetch(llm_config.endpoint, {
+      method: "POST",
+      headers: {
+        "Authorization": llm_config.api_key.startsWith('Bearer') ? llm_config.api_key : `Bearer ${llm_config.api_key}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: llm_config.model || "default",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: idea }
+        ],
+        stream: true
+      })
+    });
+
+    return new Response(response.body, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache"
+      }
+    });
+  } catch (e) {
+    return new Response(e.message, { status: 500, headers: corsHeaders });
+  }
 }
 
 function getPRDPrompt(idea) {
@@ -108,9 +125,35 @@ TONE: Professional, concise, actionable.`;
 }
 
 async function handleSavedPRDs(request, env) {
-  // Placeholder for R2 integration
-  // Akan diimplementasi setelah ada token
-  return new Response("Saved PRDs feature WIP - needs R2 integration", { 
-    status: 200 
-  });
+  if (request.method === "POST") {
+    try {
+      const body = await request.json();
+      const { id, content } = body;
+      if (!id || !content) return new Response("Missing id or content", { status: 400, headers: corsHeaders });
+      
+      await env.PRD_BUCKET.put(`prds/${id}.md`, content);
+      return new Response(JSON.stringify({ success: true, id }), { 
+        status: 200, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    } catch (e) {
+      return new Response(e.message, { status: 500, headers: corsHeaders });
+    }
+  } else if (request.method === "GET") {
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    
+    if (id && id !== "saved-prds" && id !== "") {
+      const object = await env.PRD_BUCKET.get(`prds/${id}.md`);
+      if (!object) return new Response("Not found", { status: 404, headers: corsHeaders });
+      const content = await object.text();
+      return new Response(content, { status: 200, headers: { ...corsHeaders, "Content-Type": "text/markdown" } });
+    }
+    
+    const listed = await env.PRD_BUCKET.list({ prefix: 'prds/' });
+    const keys = listed.objects.map(o => o.key);
+    return new Response(JSON.stringify({ prds: keys }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  
+  return new Response("Method not allowed", { status: 405, headers: corsHeaders });
 }
