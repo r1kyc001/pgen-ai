@@ -1,8 +1,0 @@
-name = "pgen-ai-worker"
-main = "src/index.js"
-compatibility_date = "2024-05-28"
-account_id = "70ae74494ad5fa993458e9145d8f9ad7"
-
-[[r2_buckets]]
-binding = "PRD_BUCKET"
-bucket_name = "pgen-ai-storage"
